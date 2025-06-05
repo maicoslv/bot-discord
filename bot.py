@@ -66,6 +66,31 @@ async def check_inactivity():
                 del last_message_time[user_id]
         await asyncio.sleep(30)
 
+import random
+
+@bot.command(name="ajuda")
+async def ajuda(ctx):
+    await ctx.send(
+        "📜 Comandos disponíveis:\n"
+        "- `!ajuda`: Mostra esta mensagem\n"
+        "- `!ola`: Te cumprimento\n"
+        "- `!piada`: Envia uma piada aleatória"
+    )
+
+@bot.command(name="ola")
+async def ola(ctx):
+    await ctx.send(f"Olá {ctx.author.name}! 👋")
+
+@bot.command(name="piada")
+async def piada(ctx):
+    piadas = [
+        "Por que o JavaScript foi ao terapeuta? Porque ele tinha problemas com 'escopo'. 😂",
+        "O que o Python disse ao programador triste? 'print(\"Vai ficar tudo bem\")' 🐍",
+        "Qual é o café mais perigoso do mundo? O *ex-presso*! ☕💣"
+    ]
+    await ctx.send(random.choice(piadas))
+
+
 bot.run(TOKEN)
 
 

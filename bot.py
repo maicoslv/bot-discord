@@ -3,7 +3,11 @@ from discord.ext import commands
 import asyncio
 import os
 from dotenv import load_dotenv
-from datetime import datetime, timedelta, timezone  # IMPORTA timezone AQUI
+from datetime import datetime, timedelta, timezone
+from discord.utils import get
+import yt_dlp
+from collections import defaultdict, deque
+import random
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -46,7 +50,7 @@ async def on_message(message):
         return
 
     if isinstance(message.channel, discord.DMChannel) and message.author.id in allowed_friends:
-        now = datetime.now(timezone.utc)  # Agora timezone-aware
+        now = datetime.now(timezone.utc)
         last_message_time[message.author.id] = now
         print(f"Mensagem recebida de {message.author} às {now}")
 
@@ -55,7 +59,7 @@ async def on_message(message):
 async def check_inactivity():
     await bot.wait_until_ready()
     while not bot.is_closed():
-        now = datetime.now(timezone.utc)  # timezone-aware
+        now = datetime.now(timezone.utc)
         for user_id, last_time in list(last_message_time.items()):
             if now - last_time > timedelta(minutes=2):
                 user = await bot.fetch_user(user_id)
@@ -66,15 +70,16 @@ async def check_inactivity():
                 del last_message_time[user_id]
         await asyncio.sleep(30)
 
-import random
-
 @bot.command(name="ajuda")
 async def ajuda(ctx):
     await ctx.send(
         "📜 Comandos disponíveis:\n"
         "- `!ajuda`: Mostra esta mensagem\n"
         "- `!ola`: Te cumprimento\n"
-        "- `!piada`: Envia uma piada aleatória"
+        "- `!piada`: Envia uma piada aleatória\n"
+        "- `!tocar <url>`: Toca música do YouTube\n"
+        "- `!fila`: Mostra a fila de músicas\n"
+        "- `!pular`: Pula a música atual"
     )
 
 @bot.command(name="ola")
@@ -90,8 +95,106 @@ async def piada(ctx):
     ]
     await ctx.send(random.choice(piadas))
 
+# Música
+AUDIO_DIR = "musicas"
+os.makedirs(AUDIO_DIR, exist_ok=True)
+
+queues = defaultdict(deque)
+is_playing = {}
+
+# Caminho para o FFmpeg
+ffmpeg_path = r"C:\ffmpeg\bin\ffmpeg.exe"
+
+def get_yt_audio(url):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': os.path.join(AUDIO_DIR, '%(title)s.%(ext)s'),
+        'noplaylist': True,
+        'quiet': True,
+        'no_warnings': True,
+        'default_search': 'ytsearch',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'ffmpeg_location': ffmpeg_path,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info).replace('.webm', '.mp3').replace('.m4a', '.mp3')
+        return filename, info.get('title', 'Música')
+
+async def tocar_proxima(ctx, guild_id):
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+
+    if not queues[guild_id]:
+        is_playing[guild_id] = False
+        if voice_client and voice_client.is_connected():
+            await voice_client.disconnect()
+        return
+
+    next_audio = queues[guild_id].popleft()
+    filename, title = next_audio
+
+    await ctx.send(f"🎶 Tocando: **{title}**")
+
+    def after_playing(error=None):
+        fut = tocar_proxima(ctx, guild_id)
+        asyncio.run_coroutine_threadsafe(fut, bot.loop)
+
+    if voice_client:
+        voice_client.play(
+            discord.FFmpegPCMAudio(executable=ffmpeg_path, source=filename),
+            after=after_playing
+        )
+
+@bot.command(name="tocar")
+async def tocar(ctx, *, url):
+    if ctx.author.voice is None:
+        await ctx.send("Você precisa estar em um canal de voz! 🎧")
+        return
+
+    voice_channel = ctx.author.voice.channel
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+
+    filename, title = get_yt_audio(url)
+    queues[ctx.guild.id].append((filename, title))
+
+    if not voice_client:
+        voice_client = await voice_channel.connect()
+    elif voice_client.channel != voice_channel:
+        await voice_client.move_to(voice_channel)
+
+    if not is_playing.get(ctx.guild.id, False):
+        is_playing[ctx.guild.id] = True
+        await tocar_proxima(ctx, ctx.guild.id)
+    else:
+        await ctx.send(f"📥 Adicionado à fila: **{title}**")
+
+@bot.command(name="fila")
+async def fila(ctx):
+    fila = queues[ctx.guild.id]
+    if not fila:
+        await ctx.send("📭 A fila está vazia.")
+    else:
+        lista = "\n".join(f"{i+1}. {title}" for i, (_, title) in enumerate(fila))
+        await ctx.send(f"📜 Fila atual:\n{lista}")
+
+@bot.command(name="pular")
+async def pular(ctx):
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+    if voice_client and voice_client.is_connected() and voice_client.is_playing():
+        await ctx.send("⏭️ Pulando para a próxima música.")
+        voice_client.stop()  # Aciona after_playing
+    else:
+        await ctx.send("❌ Nenhuma música está tocando no momento.")
 
 bot.run(TOKEN)
+
+
+
 
 
 

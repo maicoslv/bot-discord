@@ -8,6 +8,7 @@ from discord.utils import get
 import yt_dlp
 from collections import defaultdict, deque
 import random
+import logging
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -17,15 +18,9 @@ intents.message_content = True
 intents.dm_messages = True
 
 allowed_friends = [
-    1195842056917094421,
-    348568791023747083,
-    604071914004021258,
-    259706171114389513,
-    497145088015728650,
-    1183105491501588541,
-    1379972116417609758,
-    396790961633493012,
-    220517671660290048,
+    1195842056917094421, 348568791023747083, 604071914004021258,
+    259706171114389513, 497145088015728650, 1183105491501588541,
+    1379972116417609758, 396790961633493012, 220517671660290048,
 ]
 
 last_message_time = {}
@@ -48,12 +43,10 @@ async def on_ready():
 async def on_message(message):
     if message.author == bot.user:
         return
-
     if isinstance(message.channel, discord.DMChannel) and message.author.id in allowed_friends:
         now = datetime.now(timezone.utc)
         last_message_time[message.author.id] = now
         print(f"Mensagem recebida de {message.author} às {now}")
-
     await bot.process_commands(message)
 
 async def check_inactivity():
@@ -79,7 +72,8 @@ async def ajuda(ctx):
         "- `!piada`: Envia uma piada aleatória\n"
         "- `!tocar <url>`: Toca música do YouTube\n"
         "- `!fila`: Mostra a fila de músicas\n"
-        "- `!pular`: Pula a música atual"
+        "- `!pular`: Pula a música atual\n"
+        "- `!parar`: Para a música e limpa a fila"
     )
 
 @bot.command(name="ola")
@@ -100,10 +94,10 @@ AUDIO_DIR = "musicas"
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 queues = defaultdict(deque)
-is_playing = {}
+voice_clients = {} #guarda o voice client de cada guild 
+is_playing = defaultdict(lambda:False)
 
-# Caminho para o FFmpeg
-ffmpeg_path = r"C:\ffmpeg\bin\ffmpeg.exe"
+ffmpeg_path = r"c\ffmpeg\bin\ffmpeg.exe"
 
 def get_yt_audio(url):
     ydl_opts = {
@@ -126,9 +120,9 @@ def get_yt_audio(url):
         filename = ydl.prepare_filename(info).replace('.webm', '.mp3').replace('.m4a', '.mp3')
         return filename, info.get('title', 'Música')
 
+
 async def tocar_proxima(ctx, guild_id):
     voice_client = get(bot.voice_clients, guild=ctx.guild)
-
     if not queues[guild_id]:
         is_playing[guild_id] = False
         if voice_client and voice_client.is_connected():
@@ -137,7 +131,6 @@ async def tocar_proxima(ctx, guild_id):
 
     next_audio = queues[guild_id].popleft()
     filename, title = next_audio
-
     await ctx.send(f"🎶 Tocando: **{title}**")
 
     def after_playing(error=None):
@@ -184,14 +177,34 @@ async def fila(ctx):
 
 @bot.command(name="pular")
 async def pular(ctx):
+    ctx.send(voice_client.is_connected())
     voice_client = get(bot.voice_clients, guild=ctx.guild)
     if voice_client and voice_client.is_connected() and voice_client.is_playing():
         await ctx.send("⏭️ Pulando para a próxima música.")
-        voice_client.stop()  # Aciona after_playing
+        voice_client.stop()
     else:
         await ctx.send("❌ Nenhuma música está tocando no momento.")
 
-bot.run(TOKEN)
+@bot.command(name="parar")
+async def parar(ctx):
+    guild_id = ctx.guild.id
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+
+    if voice_client and voice_client.is_connected():
+        queues[guild_id].clear()
+        is_playing[guild_id] = False
+        await ctx.send("⏹️ Parando a música e limpando a fila.")
+        voice_client.stop()
+        await voice_client.disconnect()
+    else:
+        await ctx.send("❌ Nenhuma música está sendo tocada.")
+
+handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
+
+# Assume client refers to a discord.Client subclass...
+bot.run(TOKEN, log_handler=handler, log_level=logging.DEBUG)
+
+
 
 
 
